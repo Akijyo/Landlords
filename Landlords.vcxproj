@@ -15,8 +15,7 @@
     <Keyword>QtVS_v304</Keyword>
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">10.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">10.0</WindowsTargetPlatformVersion>
-    <QtMsBuild Condition="'$(QtMsBuild)'=='' OR !Exists('$(QtMsBuild)\qt.targets')"
-      >$(MSBuildProjectDirectory)\QtMsBuild</QtMsBuild>
+    <QtMsBuild Condition="'$(QtMsBuild)'=='' OR !Exists('$(QtMsBuild)\qt.targets')">$(MSBuildProjectDirectory)\QtMsBuild</QtMsBuild>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="Configuration">
@@ -46,11 +45,8 @@
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
-  <Target Name="QtMsBuildNotFound"
-    BeforeTargets="CustomBuild;ClCompile"
-    Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
-    <Message Importance="High"
-      Text="QtMsBuild: could not locate qt.targets, qt.props; project may not build correctly." />
+  <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
+    <Message Importance="High" Text="QtMsBuild: could not locate qt.targets, qt.props; project may not build correctly." />
   </Target>
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared" />
@@ -96,12 +92,45 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <QtRcc Include="GamePannel.qrc"/>
-    <QtUic Include="GamePannel.ui"/>
-    <QtMoc Include="GamePannel.h"/>
-    <ClCompile Include="GamePannel.cpp"/>
-    <ClCompile Include="main.cpp"/>
-
+    <ClCompile Include="Animation.cpp" />
+    <ClCompile Include="ButtonGroup.cpp" />
+    <ClCompile Include="Cards.cpp" />
+    <ClCompile Include="GameControl.cpp" />
+    <ClCompile Include="MyButton.cpp" />
+    <ClCompile Include="Player.cpp" />
+    <ClCompile Include="PlayHand.cpp" />
+    <ClCompile Include="RobotGrabLord.cpp" />
+    <ClCompile Include="RobotPlayCards.cpp" />
+    <ClCompile Include="RobotPlayer.cpp" />
+    <ClCompile Include="ScorePanel.cpp" />
+    <ClCompile Include="Strategy.cpp" />
+    <ClCompile Include="UserPlayer.cpp" />
+    <QtRcc Include="GamePannel.qrc" />
+    <QtUic Include="ButtonGroup.ui" />
+    <QtUic Include="GamePannel.ui" />
+    <QtMoc Include="GamePannel.h" />
+    <ClCompile Include="Card.cpp" />
+    <ClCompile Include="CardPanel.cpp" />
+    <ClCompile Include="GamePannel.cpp" />
+    <ClCompile Include="main.cpp" />
+    <QtUic Include="ScorePanel.ui" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="Animation.h" />
+    <ClInclude Include="PlayHand.h" />
+    <QtMoc Include="RobotGrabLord.h" />
+    <QtMoc Include="RobotPlayCards.h" />
+    <ClInclude Include="Strategy.h" />
+    <QtMoc Include="ButtonGroup.h" />
+    <ClInclude Include="Card.h" />
+    <ClInclude Include="Cards.h" />
+    <QtMoc Include="MyButton.h" />
+    <QtMoc Include="ScorePanel.h" />
+    <QtMoc Include="GameControl.h" />
+    <QtMoc Include="UserPlayer.h" />
+    <QtMoc Include="RobotPlayer.h" />
+    <QtMoc Include="Player.h" />
+    <QtMoc Include="CardPanel.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
