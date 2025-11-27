@@ -7,6 +7,7 @@ GameControl::GameControl(QObject *parent)
 	this->m_pendingPlayer = nullptr;
 	this->m_robotLeft = nullptr;
 	this->m_robotRight = nullptr;
+	this->m_lordPlayer = nullptr;
 	this->m_user = nullptr;
 	this->m_baseScore = 0;
 }
@@ -309,6 +310,12 @@ void GameControl::onPlayerPlayCards(Player* player, const Cards& cards)
 				nextPlayer->setScore(nextPlayer->getScore() - this->m_baseScore * 2);
 			}
 		}
+		//清空当前待处理牌和待处理牌玩家
+		this->m_pendingCards.clear();
+		this->m_pendingPlayer = nullptr;
+		this->m_robotLeft->setPending(this->m_pendingCards, this->m_pendingPlayer);
+		this->m_user->setPending(this->m_pendingCards, this->m_pendingPlayer);
+		this->m_robotRight->setPending(this->m_pendingCards, this->m_pendingPlayer);
 		emit this->sigPlayerStateChanged(player, GameControl::PlayerState::Won);
 		return;
 	}

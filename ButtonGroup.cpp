@@ -99,3 +99,8 @@ void ButtonGroup::setCurrentPage(PageIndex index,int bet)
 	}
 }
 
+ButtonGroup::PageIndex ButtonGroup::getCurrentPage() const
+{
+	return static_cast<PageIndex>(this->ui.stackedWidget->currentIndex());
+}
+

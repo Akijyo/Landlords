@@ -177,6 +177,48 @@ QVector<Card> Cards::toOrderlyList(SortType sortType) const
 				}
 			});
 	}
+	else if (sortType == SortType::Display)
+	{
+		// 1) 基于 Desc 的基础顺序，保证点力/花色的一致性
+		std::sort(list.begin(), list.end(), [](const Card& a, const Card& b)//正常降序
+			{
+				if (a.getPoint() == b.getPoint()) return a.getSuit() > b.getSuit();
+				return a.getPoint() > b.getPoint();
+			});
+
+		// 2) 分桶：按点数聚合，记录点数出现顺序（遵循基础顺序）
+		QHash<int, QVector<Card>> buckets; // key: CardPoint
+		QList<int> order;                  // 点数出现顺序（高到低）
+		order.reserve(list.size());
+
+		for (const Card& c : list)
+		{
+			int key = static_cast<int>(c.getPoint());
+			if (!buckets.contains(key))
+			{
+				buckets.insert(key, {});
+				order.push_back(key);// 记录点数出现顺序
+			}
+			buckets[key].push_back(c);//这里在为每个点数的桶中添加卡牌，实现分桶
+		}
+
+		// 3) 组装：4张组 -> 3张组 -> 2张组 -> 1张组；同一张数组内保持点数与花色的基础顺序
+		QVector<Card> display;
+		display.reserve(list.size());
+		for (int cnt = 4; cnt >= 1; --cnt)
+		{
+			for (int key : order)
+			{
+				const auto& v = buckets[key];
+				if (v.size() == cnt)
+				{
+					display += v;
+				}
+				//这样就实现了按组数从多到少的顺序排列
+			}
+		}
+		return display;
+	}
 	return list;
 }
 

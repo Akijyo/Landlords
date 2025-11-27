@@ -42,5 +42,8 @@ private:
 	bool m_isSelected;//是否被选中
 	Card m_card;//卡牌数据,卡牌花色和点数
 	Player* m_owner;//卡牌所属玩家
+
+signals:
+	void sigCardSelected(CardPanel* cardPanel);//卡牌被选中信号
 };
 

@@ -96,5 +96,6 @@
         <file>images/score2.png</file>
         <file>images/score3.png</file>
         <file>images/shunzi.png</file>
+        <file>images/gameover.png</file>
     </qresource>
 </RCC>

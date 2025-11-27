@@ -12,6 +12,7 @@ public:
 	{
 		Asc,
 		Desc,
+		Display,
 		None
 	};
 

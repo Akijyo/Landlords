@@ -1,5 +1,6 @@
 #include "GamePannel.h"
 
+//构造函数
 GamePannel::GamePannel(QWidget *parent)
     : QMainWindow(parent)
 {
@@ -34,371 +35,253 @@ GamePannel::GamePannel(QWidget *parent)
 	//8.初始化开始游戏前的卡牌场景
 	this->initCardsScene();
 
-	//初始发牌步长
-	this->m_cardMovePos = 0;
-	//初始化定时器
-	this->m_dealCardTimer = new QTimer(this);
-	this->m_dealCardTimer->setTimerType(Qt::PreciseTimer);
-	connect(this->m_dealCardTimer, &QTimer::timeout, this, &GamePannel::onDealCardTimerTimeout);
-	//初始化地主牌移动定时器
-	this->m_lordCardMoveTimer = new QTimer(this);
-	this->m_lordCardMoveTimer->setTimerType(Qt::PreciseTimer);
-	connect(this->m_lordCardMoveTimer, &QTimer::timeout, this, &GamePannel::onBaseToLordTimeout);
-	this->m_lordCardMoveIndex = 0;
+	//9.初始化用户倒计时窗口
+	this->initUserTicking();
 
 	//初始化动画类
 	this->m_animation = new Animation(this);
+
+	//初始化拖选功能的成员变量
+	this->m_dragActive = false;
+	this->m_dragTargetSelected = false;
+
+	//为主窗口安装事件过滤器
+	this->installEventFilter(this);
+
+	this->m_endingPanel = nullptr;
 }
 
 GamePannel::~GamePannel()
 {}
 
+//绘图事件，主要用于绘制主窗口背景
 void GamePannel::paintEvent(QPaintEvent * event)
 {
 	QPainter painter(this);
 	painter.drawPixmap(this->rect(), this->m_background);
 }
 
-void GamePannel::initGameControl()
+//实现拖选功能
+bool GamePannel::eventFilter(QObject* obj, QEvent* event)
 {
-	this->m_gameControl = new GameControl(this);//实例化游戏控制类对象
-	this->m_gameControl->initPlayer();//初始化玩家
-	this->m_playerList.append(this->m_gameControl->getRobotLeft());//左机器人
-	this->m_playerList.append(this->m_gameControl->getUser());//用户玩家
-	this->m_playerList.append(this->m_gameControl->getRobotRight());//右机器人	
-	//处理玩家状态变化的信号槽
-	connect(this->m_gameControl, &GameControl::sigPlayerStateChanged, this, &GamePannel::playerStateProcess);
-	//处理游戏状态变化的信号槽
-	connect(this->m_gameControl, &GameControl::sigGameStateChanged, this, &GamePannel::gameStateProcess);
-	//处理叫地主时期的窗口变化控制信号槽
-	connect(this->m_gameControl, &GameControl::sigPlayerGrabLordBet, this, &GamePannel::onPlayerGrabLordBet);
-	//处理出牌时期的窗口变化控制信号槽
-	connect(this->m_gameControl, &GameControl::sigPlayerPlayCards, this, &GamePannel::onResponsePlayCards);
+	// 只关心鼠标相关事件
+	if (event->type() != QEvent::MouseButtonPress &&
+		event->type() != QEvent::MouseButtonDblClick &&
+		event->type() != QEvent::MouseMove &&
+		event->type() != QEvent::MouseButtonRelease)
+	{
+		return QMainWindow::eventFilter(obj, event);
+	}
+	//如果当前游戏状态不是出牌状态，直接返回
+	if (this->m_currentGameState != GameControl::GameState::PlayingCards)
+	{
+		return QMainWindow::eventFilter(obj, event);
+	}
+	//如果当前按钮页面不是出牌页面，直接返回
+	if (this->ui.buttonGroup->getCurrentPage() != ButtonGroup::OnlyPlayCardsPage &&
+		this->ui.buttonGroup->getCurrentPage() != ButtonGroup::PlayAndRefusePage)
+	{
+		return QMainWindow::eventFilter(obj, event);
+	}
+	CardPanel* cardPanel = qobject_cast<CardPanel*>(obj);
+	const bool isMainWindow = (obj == this);
+	
+	if (cardPanel != nullptr)//在qobject_cast<CardPanel*>(obj);中，如何事件目标对象不是CardPanel类型，则返回nullptr
+	{
+		//仅允许用户玩家的手牌窗口可以被选
+		if (cardPanel->getOwner() != this->m_gameControl->getUser())
+		{
+			return QMainWindow::eventFilter(obj, event);
+		}
+		switch (event->type())
+		{
+			case QEvent::MouseButtonPress:
+			case QEvent::MouseButtonDblClick:
+			{
+				//处理左键按下事件
+				auto* me = static_cast<QMouseEvent*>(event);
+				if (me->button() != Qt::LeftButton)
+				{
+					break;
+				}
+				//这里事件是仅仅点击，不算进入拖选模式
+				this->m_curSelCard = cardPanel;//把当前点击的牌保存，用于后面拖选进行辅助判断
+				this->m_dragActive = false;
+				this->m_dragTargetSelected = !cardPanel->isSelected();
+				//处理这张牌
+				cardPanel->setSelected(this->m_dragTargetSelected);//设置选中状态
+				if (this->m_dragTargetSelected)
+				{
+					this->m_selectedCardSet.insert(cardPanel);//如果是选中，加入选中集合
+				}
+				else
+				{
+					this->m_selectedCardSet.remove(cardPanel);//如果是取消选中，从选中集合移除
+				}
+				//更新用户玩家手牌窗口
+				this->updateHandCardsPanel(this->m_gameControl->getUser());
+				return true; // 事件已处理
+			}
+			case QEvent::MouseMove:
+			{
+				auto* me = static_cast<QMouseEvent*>(event);
+				if ((me->buttons() & Qt::LeftButton) == 0)
+				{
+					break;
+				}
+				//在主窗口全局坐标系中获取鼠标位置
+				QPoint local = this->mapFromGlobal(me->globalPosition().toPoint());
+				//由于卡牌窗口叠加显示在主窗口的最上层，所以按住的那个位置的鼠标在主窗口坐标系中命中的窗口就是卡牌窗口
+				auto* over = qobject_cast<CardPanel*>(this->childAt(local));
+				if (!this->m_dragActive && over != nullptr && over != this->m_curSelCard)
+				{
+					//如果当前按住鼠标左键，并且鼠标悬停在某个卡牌窗口上，并且这个卡牌窗口不是当前点击的卡牌窗口
+					//进入拖选模式
+					this->m_dragActive = true;
+				}
+				if (this->m_dragActive)//拖选模式逻辑处理
+				{
+					if (over == nullptr)//如果拖到牌外，直接返回
+					{
+						break;
+					}
+					//仅允许用户玩家的手牌窗口可以被选
+					if (over->getOwner() != this->m_gameControl->getUser())
+					{
+						return QMainWindow::eventFilter(obj, event);
+					}
+					this->m_dragTargetSelected = !over->isSelected();
+					//拖选模式
+					if (over != this->m_curSelCard)
+					{
+						//如果上一次处理的牌不是当前悬停的牌
+						this->m_curSelCard = over;//更新当前选中的牌
+						over->setSelected(this->m_dragTargetSelected);//设置选中状态
+						if (this->m_dragTargetSelected)
+						{
+							this->m_selectedCardSet.insert(over);//如果是选中，加入选中集合
+						}
+						else
+						{
+							this->m_selectedCardSet.remove(over);//如果是取消选中，从选中集合移除
+						}
+						//更新用户玩家手牌窗口
+						this->updateHandCardsPanel(this->m_gameControl->getUser());
+					}
+				}
+				return true; // 事件已处理
+			}
+			case QEvent::MouseButtonRelease:
+			{
+				//处理鼠标左键释放事件
+				auto* me = static_cast<QMouseEvent*>(event);
+				if (me->button() != Qt::LeftButton)
+				{
+					break;
+				}
+				//结束拖选模式
+				this->m_dragActive = false;
+				this->m_curSelCard = nullptr;
+				return true; // 事件已处理
+			}
+			default:
+				break;
+		}
+		return QMainWindow::eventFilter(obj, event);
+	}
+	// 情况二：事件来自主窗口（用于“从牌外拖入牌内”的拖选）
+	if (isMainWindow)
+	{
+		switch (event->type())
+		{
+		case QEvent::MouseButtonPress:
+		{
+			auto* me = static_cast<QMouseEvent*>(event);
+			if (me->button() != Qt::LeftButton)
+			{
+				break;
+			}
+			// 在牌外按下：不改变任何牌状态，仅重置拖选状态
+			this->m_dragActive = false;
+			this->m_curSelCard = nullptr;
+			// 不拦截，允许主窗口其它行为（如果有）
+			return QMainWindow::eventFilter(obj, event);
+		}
+		case QEvent::MouseMove://从牌外拖入牌内的核心逻辑
+		{
+			auto* me = static_cast<QMouseEvent*>(event);
+			if ((me->buttons() & Qt::LeftButton) == 0)
+			{
+				break;
+			}
+
+			// 从主窗口坐标命中卡牌
+			QPoint local = this->mapFromGlobal(me->globalPosition().toPoint());
+			auto* over = qobject_cast<CardPanel*>(this->childAt(local));
+			if (over == nullptr)
+			{
+				break;
+			}
+			// 仅允许用户玩家的卡牌
+			if (over->getOwner() != this->m_gameControl->getUser())
+			{
+				break;
+			}
+
+			if (!this->m_dragActive && over != this->m_curSelCard)
+			{
+				this->m_dragActive = true; // 进入拖选模式
+			}
+			if (this->m_dragActive)
+			{
+				this->m_dragTargetSelected = !over->isSelected();
+
+				if (over != this->m_curSelCard)
+				{
+					this->m_curSelCard = over;
+					over->setSelected(this->m_dragTargetSelected);
+					if (this->m_dragTargetSelected)
+					{
+						this->m_selectedCardSet.insert(over);
+					}
+					else
+					{
+						this->m_selectedCardSet.remove(over);
+					}
+					this->updateHandCardsPanel(this->m_gameControl->getUser());
+				}
+				return true; // 我们已经处理了拖选
+			}
+			break;
+		}
+		case QEvent::MouseButtonRelease:
+		{
+			auto* me = static_cast<QMouseEvent*>(event);
+			if (me->button() != Qt::LeftButton)
+			{
+				break;
+			}
+			this->m_dragActive = false;
+			this->m_curSelCard = nullptr;
+			return true;
+		}
+		default:
+			break;
+		}
+		// 其它主窗口事件按默认处理
+		return QMainWindow::eventFilter(obj, event);
+	}
+	return QMainWindow::eventFilter(obj, event);
 }
 
+
+//更新玩家得分面板
 void GamePannel::updatePlayerScores()
 {
 	this->ui.scorePanel->setScores(this->m_playerList[0]->getScore(), this->m_playerList[1]->getScore(), this->m_playerList[2]->getScore());
 }
 
-void GamePannel::initCardsData()
-{
-	//加载卡牌图片
-	QPixmap pixmap(":/Animation/images/card.png");
-	QVector<int> suitIndex = { 2,3,1,4 };//由于卡牌类里的枚举是1-4顺序是红桃方块梅花黑桃，但是图片顺序是方块梅花红桃黑桃，所以需要一个映射数组
-
-	//计算每个卡牌的大小
-	this->cardSize.setWidth(pixmap.width() / 13);//宽度为图片宽度的1/13
-	this->cardSize.setHeight(pixmap.height() / 5);//高度为图片高度的1/5
-
-	//分割背景图
-	this->m_cardBackImage = pixmap.copy(2 * this->cardSize.width(), 4 * this->cardSize.height(), this->cardSize.width(), this->cardSize.height());
-
-	//分割大小王
-	Card bigJoker(Card::CardSuit::Suit_end, Card::CardPoint::Card_BigJoker);
-	this->cropCardImages(pixmap, this->cardSize.width(), 4 * this->cardSize.height(), bigJoker);
-
-	Card smallJoker(Card::CardSuit::Suit_end, Card::CardPoint::Card_Joker);
-	this->cropCardImages(pixmap, 0, 4 * this->cardSize.height(), smallJoker);
-
-	//分割点数牌
-	for(int i=0;i<4;i++)//花色循环
-	{
-		for(int j=0;j<13;j++)//点数循环
-		{
-			Card c(Card::CardSuit(suitIndex[i]), Card::CardPoint(j + 1));//根据映射数组获取正确的花色
-			this->cropCardImages(pixmap, j * this->cardSize.width(), i * this->cardSize.height(), c);
-		}
-	}
-}
-
-void GamePannel::cropCardImages(QPixmap& pixmap, int x, int y, Card& c)
-{
-	QPixmap sub = pixmap.copy(x, y, this->cardSize.width(), this->cardSize.height());//切割图片
-	CardPanel* cardPanel = new CardPanel(this);//创建卡牌窗口
-	cardPanel->setImages(sub, this->m_cardBackImage);//设置卡牌窗口的正反面图片
-	cardPanel->setCard(c);//设置卡牌数据
-	cardPanel->hide();//卡牌窗口最开始隐藏
-	this->m_cardMap.insert(c, cardPanel);//将卡牌与卡牌窗口绑定
-}
-
-void GamePannel::initButtonGroup()
-{
-	this->ui.buttonGroup->initButton();//初始化按钮组
-	this->ui.buttonGroup->setCurrentPage(ButtonGroup::StartGamePage);//设置初始页面为开始游戏页面
-	//连接按钮信号与槽，具体做什么待定
-	//TODO
-	connect(this->ui.buttonGroup,&ButtonGroup::sigStartGame,this,[=]()
-		{
-			//点击开始游戏后，窗口的初始化
-			//隐藏按钮组，切换到stackedWidget的空的那一页
-			this->ui.buttonGroup->setCurrentPage(ButtonGroup::EmptyPage);
-			//分数清空
-			this->m_gameControl->resetScore();
-			this->updatePlayerScores();
-			//游戏状态->发牌状态
-			this->gameStateProcess(GameControl::GameState::DealingCards);
-		});
-	connect(this->ui.buttonGroup, &ButtonGroup::sigPlayCards, this, [=]()
-		{});
-	connect(this->ui.buttonGroup, &ButtonGroup::sigRefuseCards, this, [=]()
-		{});
-	connect(this->ui.buttonGroup, &ButtonGroup::sigGrabLord, this, [=](int score)
-		{
-			//用户点击抢地主按钮后，调用用户玩家的grabLordBet函数
-			this->m_gameControl->getUser()->grabLordBet(score);
-			//按钮组切换到等待页面
-			this->ui.buttonGroup->setCurrentPage(ButtonGroup::EmptyPage);
-		});
-}
-
-void GamePannel::initPlayerContext()
-{
-	//放置玩家扑克牌的区域
-	const QRect cardsRect[] =
-	{
-		// x, y, width, height
-		QRect(90, 130, 100, height() - 200),                    // 左侧机器人
-		QRect(250, rect().bottom() - 120, width() - 500, 100),   // 当前玩家
-		QRect(rect().right() - 190, 130, 100, height() - 200)  // 右侧机器人
-	};
-	//放置玩家出牌的区域
-	const QRect playHandRect[] =
-	{
-		QRect(260, 150, 100, 100),                              // 左侧机器人
-		QRect(150, rect().bottom() - 290, width() - 300, 105),   // 当前玩家
-		QRect(rect().right() - 360, 150, 100, 100)           // 右侧机器人
-	};
-	//玩家头像的显示位置
-	const QPoint roleImgPos[] =
-	{
-		QPoint(cardsRect[0].left() - 80, cardsRect[0].height() / 2 + 20),     // 左侧机器人
-		QPoint(cardsRect[1].right() - 10, cardsRect[1].top() - 10) ,           // 当前玩家
-		QPoint(cardsRect[2].right() + 10, cardsRect[2].height() / 2 + 20)    // 右侧机器人
-	};
-
-	//为三个玩家初始化上下文环境
-	int userIndex = this->m_playerList.indexOf(this->m_gameControl->getUser());//获取用户玩家的索引
-	for (int i = 0;i < 3;i++)
-	{
-		PlayerContext context;
-		//1.玩家扑克牌显示区域
-		context.cardAreaRect = cardsRect[i];
-		//2.玩家出牌显示区域
-		context.playAreaRect = playHandRect[i];
-		//3.玩家扑克牌的对齐方式
-		context.cardAlign = (i == userIndex) ? PlayerContext::CardAlign::Horizontal : PlayerContext::CardAlign::Vertical;
-		//4.扑克牌显示的正反面
-		context.isFrontSide = (i == userIndex) ? true : false;
-		//5.游玩过程的提示信息
-		context.infoLabel = new QLabel(this);
-		context.infoLabel->resize(160, 98);
-		context.infoLabel->hide();
-		//将提示信息移动到出牌区域的中心
-		context.infoLabel->move(playHandRect[i].left() + (playHandRect[i].width() - context.infoLabel->width()) / 2, 
-			playHandRect[i].top() + (playHandRect[i].height() - context.infoLabel->height()) / 2);
-		//6.玩家的头像
-		context.roleImage = new QLabel(this);
-		context.roleImage->resize(84, 120);
-		context.roleImage->hide();
-		context.roleImage->move(roleImgPos[i]);
-		//绑定玩家和玩家上下文环境
-		this->m_playerContextMap.insert(this->m_playerList[i], context);
-	}
-}
-
-void GamePannel::initCardsScene()
-{
-	//游戏中心的初始牌
-	//1.基础牌窗口
-	this->m_baseCardPanel = new CardPanel(this);
-	this->m_baseCardPanel->setImages(this->m_cardBackImage, this->m_cardBackImage);//基础牌正反面都是背面
-	//2.发牌过程中移动到玩家手中的牌窗口
-	this->m_moveCardPanel = new CardPanel(this);
-	this->m_moveCardPanel->setImages(this->m_cardBackImage, this->m_cardBackImage);
-	//3.三张地主牌
-	for (int i = 0;i <3;i++)
-	{
-		CardPanel* cp = new CardPanel(this);
-		cp->setImages(this->m_cardBackImage, this->m_cardBackImage);
-		this->m_lordCardPanelList.append(cp);
-		this->m_lordCardPanelList[i]->hide();
-		//地主牌最开始隐藏，当牌发完，地主抢完之后再显示正面到主窗口最上方
-	}
-	//4.每个牌窗口所在的位置
-	//4.1基础牌和移动牌初始都在窗口中心偏上50像素的位置
-	QPoint baseCardPos((this->width() - this->cardSize.width()) / 2, (this->height() - this->cardSize.height()) / 2-50);
-	this->m_baseCardPos = baseCardPos;
-	this->m_baseCardPanel->move(baseCardPos);
-	this->m_moveCardPanel->move(baseCardPos);
-	//4.2地主牌显示的位置是在窗口顶部往下20像素y轴，三张牌间隔10像素x轴中心排放
-	int baseX = (this->width() - (3 * this->cardSize.width() + 2 * 10)) / 2;//计算三张牌的最左侧位置
-	for (int i = 0;i < 3;i++)
-	{
-		//隔10像素间隔依次排布
-		this->m_lordCardPanelList[i]->move(baseX + i * (this->cardSize.width() + 10), 20);
-	}
-}
-
-void GamePannel::gameStateProcess(GameControl::GameState gameState)
-{
-	this->m_currentGameState = gameState;
-	switch (gameState)
-	{
-	case GameControl::DealingCards:
-		this->dealCardsProcess();
-		break;
-	case GameControl::CallingLord:
-		this->callLordProcess();
-		break;
-	case GameControl::PlayingCards:
-		this->playCardsProcess();
-		break;
-	default:
-		break;
-	}
-}
-
-void GamePannel::dealCardsProcess()
-{
-	//重置每张卡牌窗口的属性
-	for (auto it : this->m_cardMap)
-	{
-		it->setFrontSide(true);
-		it->setSelected(false);
-		it->hide();
-	}
-	//隐藏三张地主牌
-	for (auto& it : this->m_lordCardPanelList)
-	{
-		it->hide();
-	}
-	//重置玩家上下文环境
-	int userIndex = this->m_playerList.indexOf(this->m_gameControl->getUser());//获取用户玩家的索引
-	for (int i = 0;i < this->m_playerList.size();i++)
-	{
-		//重置手牌朝向
-		this->m_playerContextMap[this->m_playerList[i]].isFrontSide = (i == userIndex) ? true : false;
-		//隐藏玩家提示信息
-		this->m_playerContextMap[this->m_playerList[i]].infoLabel->hide();
-		//隐藏玩家头像
-		this->m_playerContextMap[this->m_playerList[i]].roleImage->hide();
-		//清空玩家上次打出的牌
-		this->m_playerContextMap[this->m_playerList[i]].lastPlayCards.clear();
-	}
-	//重置所有玩家卡牌数据
-	this->m_gameControl->resetCards();
-	//显示底牌
-	this->m_baseCardPanel->show();
-	//隐藏按钮组
-	this->ui.buttonGroup->setCurrentPage(ButtonGroup::EmptyPage);
-	//启动定时器,完成发牌动画
-	this->m_dealCardTimer->start(3);
-	
-	//发牌音效
-	//TODO
-}
-
-void GamePannel::onDealCardTimerTimeout()
-{
-	//得到当前被发牌的玩家
-	Player* curPlayer = this->m_gameControl->getCurrentPlayer();
-	//如果当前这张牌已经发到对应玩家手中
-	if (this->m_cardMovePos >= 100)
-	{
-		//从牌堆中取出一张牌
-		Card c = this->m_gameControl->takeOneCard();
-		//将这张牌存入玩家手牌
-		curPlayer->storeDealCard(c);
-		//将这张牌对应的卡牌窗口移动到玩家手牌显示区域
-		Cards hcs;
-		hcs << c;
-		this->disposHandCards(curPlayer, hcs);
-		//切换玩家
-		this->m_gameControl->setCurrentPlayer(curPlayer->getNextPlayer());
-		//重置发牌步长
-		this->m_cardMovePos = 0;
-		//如果牌已经发完
-		if (this->m_gameControl->getSurplusCards().size() == 3)
-		{
-			//复位移动牌并且隐藏
-			this->m_moveCardPanel->move(this->m_baseCardPos);
-			this->m_moveCardPanel->hide();
-			//停止发牌计时器
-			this->m_dealCardTimer->stop();
-			//重置牌移动步长
-			this->m_cardMovePos = 0;
-			//启动地主牌移动定时器，完成地主牌移动动画
-			this->m_lordCardMoveTimer->start(3);
-			//在onBaseToLordTimeout函数中切换到叫地主状态
-			return;
-		}
-	}
-	//移动扑克牌
-	this->cardMoveStep(curPlayer);
-	this->m_cardMovePos += 2;
-
-}
-
-void GamePannel::cardMoveStep(Player* curPlayer)
-{
-	// 进度t：0.0 -> 1.0
-	const int totalSteps = 100;
-	const qreal t = std::min<qreal>(1.0, m_cardMovePos / qreal(totalSteps));
-
-	// 目标区域（玩家手牌显示区域）
-	const QRect area = this->m_playerContextMap[curPlayer].cardAreaRect;
-
-	// 三个玩家在 m_playerList 中的顺序：左机器人=0，用户=1，右机器人=2
-	const int idx = this->m_playerList.indexOf(curPlayer);
-
-	// 以“卡片外沿贴边”为终点，避免视觉偏差
-	// 注意：QRect::right() 是包含性坐标（x+width-1），所以要减去卡片宽再+1
-	const int targetX_Left = area.right() - this->cardSize.width() + 1; // 卡片右沿贴 area.right()
-	const int targetX_Right = area.left();                                // 卡片左沿贴 area.left()
-	const int targetY_User = area.top() - this->cardSize.height();       // 卡片下沿贴 area.top()
-
-	// 基点（发牌起点）
-	const QPoint start = this->m_baseCardPos;
-
-	QPoint pos = start;
-	switch (idx)
-	{
-	case 0: // 左机器人：水平向左
-	{
-		const qreal dx = qreal(targetX_Left - start.x());
-		pos.setX(int(std::lround(start.x() + t * dx)));
-		pos.setY(start.y()); // 保持水平直线
-		break;
-	}
-	case 1: // 用户：垂直向下
-	{
-		const qreal dy = qreal(targetY_User - start.y());
-		pos.setX(start.x()); // 保持垂直直线
-		pos.setY(int(std::lround(start.y() + t * dy)));
-		break;
-	}
-	case 2: // 右机器人：水平向右
-	{
-		const qreal dx = qreal(targetX_Right - start.x());
-		pos.setX(int(std::lround(start.x() + t * dx)));
-		pos.setY(start.y()); // 保持水平直线
-		break;
-	}
-	default:
-		break;
-	}
-
-	// 移动卡片
-	this->m_moveCardPanel->move(pos);
-
-	// 显隐控制
-	if (this->m_cardMovePos == 0)
-		this->m_moveCardPanel->show();
-	if (this->m_cardMovePos >= totalSteps)
-		this->m_moveCardPanel->hide();
-}
-
+//这个函数发生在发牌动画之后，当一张牌发给某个玩家后，调用这个函数更新玩家手牌
 void GamePannel::disposHandCards(Player* player, const Cards& hcards)
 {
 	//将发出的牌设置给对应拥有者
@@ -412,6 +295,7 @@ void GamePannel::disposHandCards(Player* player, const Cards& hcards)
 	this->updateHandCardsPanel(player);
 }
 
+//更新玩家手牌窗口位置的通用函数，一更新就是整个窗口
 void GamePannel::updateHandCardsPanel(Player* player)
 {
 	Cards hcs = player->getHandCards();
@@ -452,150 +336,8 @@ void GamePannel::updateHandCardsPanel(Player* player)
 	}
 }
 
-void GamePannel::onBaseToLordTimeout()
-{
-	//隐藏基础牌
-	if (this->m_lordCardMoveIndex == 0)
-	{
-		this->m_baseCardPanel->hide();
-	}
-	// 确保有三张临时移动牌
-	if (this->m_lordMovingPanels.size() < 3)
-	{
-		// 懒创建三张背面牌，用于飞行动画
-		for (int i = 0; i < 3; ++i)
-		{
-			CardPanel* cp = new CardPanel(this);
-			cp->setImages(this->m_cardBackImage, this->m_cardBackImage);
-			cp->setFrontSide(false);
-			cp->move(this->m_baseCardPos);
-			cp->hide();
-			this->m_lordMovingPanels.append(cp);
-		}
-	}
-	//移动牌到地主牌框
-	this->lordCardMoveStep();
-	this->m_cardMovePos += 2;
-	//移动到位
-	if (this->m_cardMovePos >= 100)
-	{
-		//隐藏移动牌
-		for (auto* cp : this->m_lordMovingPanels)
-		{
-			cp->hide();
-		}
-		//停止地主牌移动定时器
-		this->m_lordCardMoveTimer->stop();
-		this->m_cardMovePos = 0;
-		//显示三张地主牌的背面
-		QVector<Card> lordCards = this->m_gameControl->getSurplusCards().toOrderlyList();
-		for (int i = 0;i < lordCards.size();i++)
-		{
-			this->m_lordCardPanelList[i]->show();
-		}
-		//等待500毫秒切换到叫地主状态
-		QTimer::singleShot(500, this, [=]()
-			{
-				this->gameStateProcess(GameControl::GameState::CallingLord);
-			});
-	}
-}
-
-void GamePannel::lordCardMoveStep()
-{
-	// 进度 t：0.0 -> 1.0
-	const int totalSteps = 100;
-	const qreal t = std::min<qreal>(1.0, this->m_cardMovePos / qreal(totalSteps));
-
-	// 起点：中间牌堆位置
-	const QPoint start = this->m_baseCardPos;
-
-	// 三个目标：三处地主牌框的位置
-	for (int i = 0; i < 3; ++i)
-	{
-		const QPoint target = this->m_lordCardPanelList[i]->pos();
-		const int x = int(std::lround(start.x() + (target.x() - start.x()) * t));
-		const int y = int(std::lround(start.y() + (target.y() - start.y()) * t));
-		this->m_lordMovingPanels[i]->move(QPoint(x, y));
-	}
-
-	// 显隐控制（与 cardMoveStep 风格一致）
-	if (this->m_cardMovePos == 0)
-	{
-		for (auto* cp : this->m_lordMovingPanels)
-		{
-			cp->show();
-			cp->raise();
-		}
-	}
-	if (this->m_cardMovePos >= totalSteps)
-	{
-		for (auto* cp : this->m_lordMovingPanels) cp->hide();
-	}
-}
-
-void GamePannel::callLordProcess()
-{
-	//给地主牌设置牌属性和正面图片
-	QVector<Card> lordCards = this->m_gameControl->getSurplusCards().toOrderlyList();
-	for (int i = 0;i < lordCards.size();i++)
-	{
-		this->m_lordCardPanelList[i]->setCard(lordCards[i]);
-		this->m_lordCardPanelList[i]->setFrontSide(false);
-		this->m_lordCardPanelList[i]->setImages(this->m_cardMap[lordCards[i]]->getFrontImage(), this->m_cardBackImage);
-	}
-	//开始叫地主
-	this->m_gameControl->startCallLord();
-}
-
-void GamePannel::playerStateProcess(Player* player, GameControl::PlayerState playerState)
-{
-	switch (playerState)
-	{
-	case GameControl::ConsideringCallLord:
-		//如果是用户玩家，则显示按钮组的叫地主页面
-		if (player == this->m_gameControl->getUser())
-		{
-			this->ui.buttonGroup->setCurrentPage(ButtonGroup::CallAndGrabPage,this->m_gameControl->getCurHighestBet());
-		}
-		break;
-	case GameControl::ConsideringPlayCards:
-	{
-		if (player == this->m_gameControl->getUser())
-		{
-			Player* pendingPlayer = player->getPrevPlayer();
-			if (pendingPlayer == nullptr || player == pendingPlayer)//如果玩家是优先出牌的玩家
-			{
-				this->ui.buttonGroup->setCurrentPage(ButtonGroup::PageIndex::OnlyPlayCardsPage);
-			}
-			else
-			{
-				this->ui.buttonGroup->setCurrentPage(ButtonGroup::PageIndex::PlayAndRefusePage);
-			}
-		}
-		else
-		{
-			//如果是机器人玩家，则隐藏按钮组
-			this->ui.buttonGroup->setCurrentPage(ButtonGroup::EmptyPage);
-		}
-		break;
-	}
-	case GameControl::Won:
-	{
-		//把全场玩家牌面显示出来
-		this->m_playerContextMap[this->m_gameControl->getRobotLeft()].isFrontSide = true;
-		this->m_playerContextMap[this->m_gameControl->getRobotRight()].isFrontSide = true;
-		this->updateHandCardsPanel(this->m_gameControl->getRobotLeft());
-		this->updateHandCardsPanel(this->m_gameControl->getRobotRight());
-		this->updatePlayerScores();
-		this->m_gameControl->setCurrentPlayer(player);
-		break;
-	}
-	default:
-		break;
-	}
-}
-
+//这个抢地主过程的提示函数发生在GameControl类发出叫地主/抢地主信号后
+//这个过程的connect在GamePanelInit文件中的initGameControl函数里
 void GamePannel::onPlayerGrabLordBet(Player* player, int bet, bool first)
 {
 	//如果赌注为0，窗口提示不抢
@@ -618,41 +360,15 @@ void GamePannel::onPlayerGrabLordBet(Player* player, int bet, bool first)
 
 	//TODO
 	//显示叫地主分数
-	this->showAnimation(GamePannel::WindowAnimation::BetScore, bet);
+	if (bet != 0)
+	{
+		this->showAnimation(GamePannel::WindowAnimation::BetScore, bet);
+	}
 	//叫地主音效
 }
 
-void GamePannel::showAnimation(WindowAnimation type, int bet)
-{
-	switch (type)
-	{
-		case GamePannel::BetScore:
-		{
-			//固定为分数图片的大小
-			this->m_animation->setFixedSize(160, 98);
-			//确定地主分数显示位置
-			this->m_animation->move((this->width() - this->m_animation->width()) / 2, (this->height() - this->m_animation->height()) / 2 - 65);
-			//显示
-			this->m_animation->showBetAnimation(bet);
-			break;
-		}
-		case GamePannel::Joker:
-			break;
-		case GamePannel::Bomb:
-			break;
-		case GamePannel::Plane:
-			break;
-		case GamePannel::SeqSingle:
-			break;
-		case GamePannel::SeqPair:
-			break;
-		default:
-			break;
-	}
-	this->m_animation->show();
-	this->m_animation->raise();
-}
-
+//同上面函数，GameControl类发出玩家出牌信号后，会对主窗口进行一系列处理
+//这个过程的connect在GamePanelInit文件中的initGameControl函数里
 void GamePannel::onResponsePlayCards(Player* player, const Cards& playCards)
 {
 	//1.隐藏上一位玩家不出提示
@@ -666,7 +382,7 @@ void GamePannel::onResponsePlayCards(Player* player, const Cards& playCards)
 		return;
 	}
 	//下面是出牌不为空的处理
-	Player* pendingPlayer = player->getPrevPlayer();
+	Player* pendingPlayer = player->getPendingPlayer();
 
 	//隐藏当前待处理玩家的出牌提示
 	if (pendingPlayer!=nullptr&&!this->m_playerContextMap[pendingPlayer].lastPlayCards.empty())
@@ -685,7 +401,7 @@ void GamePannel::onResponsePlayCards(Player* player, const Cards& playCards)
 	this->m_playerContextMap[player].lastPlayCards = playCards;
 	
 	QRect playAreaRect = this->m_playerContextMap[player].playAreaRect;//玩家出牌显示区域
-	QVector<Card> vcards = playCards.toOrderlyList(Cards::SortType::Desc);
+	QVector<Card> vcards = playCards.toOrderlyList(Cards::SortType::Display);
 	//由于卡牌是堆叠放置，设定一个偏移量
 	int space = 24;//卡牌间隔20像素
 	for (int i = 0;i < vcards.size();i++)
@@ -740,7 +456,7 @@ void GamePannel::onResponsePlayCards(Player* player, const Cards& playCards)
 		}
 		case PlayHand::Hand_Bomb_Jokers:
 		{
-			this->showAnimation(GamePannel::WindowAnimation::Bomb);
+			this->showAnimation(GamePannel::WindowAnimation::Joker);
 			break;
 		}
 		default:
@@ -750,86 +466,71 @@ void GamePannel::onResponsePlayCards(Player* player, const Cards& playCards)
 	//5.TODO:播放音乐
 }
 
-void GamePannel::playCardsProcess()
+void GamePannel::onUserPlayCards()
 {
-	//1.隐藏窗口的所有提示信息
-	//隐藏叫分动画
-	this->m_animation->hide();
-	//隐藏玩家叫地主提示
-	for (auto it : this->m_playerContextMap)
+	//如果当前游戏状态不是出牌状态，直接返回
+	//如果当前玩家不是用户玩家，直接返回
+	//如果出牌为空，直接返回
+	if (this->m_currentGameState != GameControl::GameState::PlayingCards
+		|| this->m_gameControl->getCurrentPlayer() != this->m_gameControl->getUser()
+		|| this->m_selectedCardSet.isEmpty())
 	{
-		it.infoLabel->hide();
+		return;
 	}
-
-	//2.将地主牌翻为正面
-	for (auto& it : this->m_lordCardPanelList)
+	Cards playcards;
+	for (auto it : this->m_selectedCardSet)
 	{
-		it->setFrontSide(true);
-		it->update();
+		playcards.add(it->getCard());
 	}
+	//判断出牌是否是合法牌型
+	PlayHand ph(playcards);
+	PlayHand::HandType type = ph.getType();
+	if(type==PlayHand::Hand_Unknown)
+	{
+		//TODO:可以做一个出牌不合法的特效提示
+		return;
+	}
+	//判断出牌能否大过上家
+	Player* user = this->m_gameControl->getUser();
+	Player* pendingPlayer = this->m_gameControl->getPendingPlayer();
+	Cards pendingCards = this->m_gameControl->getPendingCards();
+	if (pendingPlayer != user && !ph.canBeat(pendingCards))
+	{
+		//TODO:可以做一个大不过上家的提示
+		return;
+	}
+	//关闭用户出牌倒计时
+	this->m_userTicking->stopTicking();
 
-	//3.完成地主牌移向玩家手牌的动画
-
-
-	//4.更新地主玩家手牌显示
-	this->updateHandCardsPanel(this->m_gameControl->getLordPlayer());
-
-	//5.显示各个玩家头像
-	this->showPlayerRoleImage();
-
-	//6.切换玩家状态并且让当前玩家出牌
-	this->playerStateProcess(this->m_gameControl->getCurrentPlayer(), GameControl::PlayerState::ConsideringPlayCards);
-	this->m_gameControl->getCurrentPlayer()->preparePlayCards();
+	//合法出牌，调用玩家类出牌函数
+	//玩家的出牌类会清除手牌中已经打出去的牌，并且发射出牌信号给GameControl类，里面的onPlayerPlayCards函数被调用，
+	// 然后又会发射出玩家出牌信号给主窗口的onResponsePlayCards函数，还会发射玩家状态变更信号给主窗口的onPlayerStateChanged函数
+	user->playCards(playcards);
+	//清空选中集合
+	this->m_selectedCardSet.clear();
 }
 
-void GamePannel::onLordCardsToLordTimeout()
+void GamePannel::onUserPassCards()
 {
-}
-
-void GamePannel::showPlayerRoleImage()
-{
-	QVector<QString> lordMale;
-	QVector<QString> lordFemale;
-	QVector<QString> farmerMale;
-	QVector<QString> farmerFemale;
-	lordMale << ":/Player/images/lord_man_1.png" << ":/Player/images/lord_man_2.png";
-	lordFemale << ":/Player/images/lord_woman_1.png" << ":/Player/images/lord_woman_2.png";
-	farmerMale << ":/Player/images/farmer_man_1.png" << ":/Player/images/farmer_man_2.png";
-	farmerFemale << ":/Player/images/farmer_woman_1.png" << ":/Player/images/farmer_woman_2.png";
-	for (auto it : this->m_playerList)
+	//如果当前游戏状态不是出牌状态，直接返回
+	//如果当前玩家不是用户玩家，直接返回
+	if (this->m_currentGameState != GameControl::GameState::PlayingCards
+		|| this->m_gameControl->getCurrentPlayer() != this->m_gameControl->getUser())
 	{
-		QImage img;
-		QPixmap pixmap;
-		int rand = QRandomGenerator::global()->bounded(lordMale.size());
-		if (it == this->m_gameControl->getLordPlayer())
-		{
-			if (it->getGender() == Player::Gender::Male)
-			{
-				img.load(lordMale[rand]);
-			}
-			else
-			{
-				img.load(lordFemale[rand]);
-			}
-		}
-		else
-		{
-			if (it->getGender() == Player::Gender::Male)
-			{
-				img.load(farmerMale[rand]);
-			}
-			else
-			{
-				img.load(farmerFemale[rand]);
-			}
-		}
-		if (it->getDirection() == Player::Direction::Right)
-		{
-			img = img.mirrored(true, false);
-		}
-		pixmap = QPixmap::fromImage(img);
-		this->m_playerContextMap[it].roleImage->setPixmap(pixmap);
-		this->m_playerContextMap[it].roleImage->show();
+		return;
 	}
+	//关闭用户出牌倒计时
+	this->m_userTicking->stopTicking();
+	//打出一个空Cards，表示不出
+	Cards temp;
+	Player* user = this->m_gameControl->getUser();
+	user->playCards(temp);
+	//清空用户手牌的选中状态，并且刷新用户手牌窗口
+	for (auto it : this->m_selectedCardSet)
+	{
+		it->setSelected(false);
+	}
+	this->m_selectedCardSet.clear();
+	this->updateHandCardsPanel(user);
 }
 

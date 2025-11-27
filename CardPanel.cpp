@@ -79,5 +79,9 @@ void CardPanel::paintEvent(QPaintEvent* event)
 
 void CardPanel::mousePressEvent(QMouseEvent* event)
 {
+	if (event->button() == Qt::LeftButton)
+	{
+		emit this->sigCardSelected(this);
+	}
 }
 

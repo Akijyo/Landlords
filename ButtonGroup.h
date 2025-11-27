@@ -26,6 +26,9 @@ public:
 	//bet参数用在抢地主那一页，用于判断是否显示部分按钮，若当前最高叫分为0，则显示全部按钮，若当前最高叫分为1，则不显示一分按钮，依此类推
 	void setCurrentPage(PageIndex index,int bet=0);//设置当前显示的页面，用于在不同状态下切换页面显示不同的按钮
 
+	//获取当前页面索引
+	PageIndex getCurrentPage() const;
+
 private:
 	Ui::ButtonGroupClass ui;
 

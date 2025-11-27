@@ -95,7 +95,11 @@
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="ButtonGroup.cpp" />
     <ClCompile Include="Cards.cpp" />
+    <ClCompile Include="EndingPanel.cpp" />
     <ClCompile Include="GameControl.cpp" />
+    <ClCompile Include="GamePanelAnim.cpp" />
+    <ClCompile Include="GamePanelInit.cpp" />
+    <ClCompile Include="GamePanelProcess.cpp" />
     <ClCompile Include="MyButton.cpp" />
     <ClCompile Include="Player.cpp" />
     <ClCompile Include="PlayHand.cpp" />
@@ -104,6 +108,7 @@
     <ClCompile Include="RobotPlayer.cpp" />
     <ClCompile Include="ScorePanel.cpp" />
     <ClCompile Include="Strategy.cpp" />
+    <ClCompile Include="Ticking.cpp" />
     <ClCompile Include="UserPlayer.cpp" />
     <QtRcc Include="GamePannel.qrc" />
     <QtUic Include="ButtonGroup.ui" />
@@ -116,7 +121,9 @@
     <QtUic Include="ScorePanel.ui" />
   </ItemGroup>
   <ItemGroup>
+    <QtMoc Include="Ticking.h" />
     <QtMoc Include="Animation.h" />
+    <QtMoc Include="EndingPanel.h" />
     <ClInclude Include="PlayHand.h" />
     <QtMoc Include="RobotGrabLord.h" />
     <QtMoc Include="RobotPlayCards.h" />

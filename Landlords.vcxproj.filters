@@ -82,6 +82,21 @@
     <ClCompile Include="RobotPlayCards.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="GamePanelInit.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GamePanelProcess.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GamePanelAnim.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EndingPanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Ticking.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Card.h">
@@ -132,6 +147,12 @@
       <Filter>Header Files</Filter>
     </QtMoc>
     <QtMoc Include="GamePannel.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="EndingPanel.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="Ticking.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>

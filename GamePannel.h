@@ -12,6 +12,10 @@
 #include<thread>
 #include<Animation.h>
 #include<PlayHand.h>
+#include<qpropertyanimation.h>
+#include<qparallelanimationgroup.h>
+#include<EndingPanel.h>
+#include<Ticking.h>
 
 class GamePannel : public QMainWindow
 {
@@ -59,15 +63,50 @@ public:
 protected:
 	//绘图事件，主要用于绘制主窗口背景
 	void paintEvent(QPaintEvent* event) override;
+	//事件截获器，主要用于实现卡牌单选/拖选功能
+	bool eventFilter(QObject* obj, QEvent* event) override;
 
 private:
-	//游戏控制类初始化，实例化游戏控制类对象，并初始化玩家，并且将三个玩家对象保存到类中
-		//这个函数初始化了GameControl类成员变量m_gameControl，并且初始化了玩家对象，并且将三个玩家对象保存到m_playerList中
-	void initGameControl();
-
+	////////////////////////////////////////////////////////////////////
+	////////////游戏窗口响应游戏变换的函数，在主文件GamePanel.cpp中////////
+	///////////////////////////////////////////////////////////////////
 	//更新玩家得分面板
 		//这个函数将玩家得分面板窗口中的分数更新为当前玩家的分数
 	void updatePlayerScores();
+
+	//更新玩家手牌，里面调用更新玩家手牌窗口位置的函数
+		//这个函数实现了为发来的牌窗口CardPanel对象设置对应所有者，并且调用updateHandCardsPanel函数更新玩家手牌窗口显示
+	void disposHandCards(Player* player, const Cards& hcards);
+
+	//更新玩家手牌窗口位置的通用函数，一更新就是整个窗口
+	void updateHandCardsPanel(Player* player);
+
+	//接收来自GameControl的叫地主/抢地主信号的槽函数
+	void onPlayerGrabLordBet(Player* player, int bet, bool first);
+
+	//接收来自GameControl的玩家出牌信号的槽函数，是界面对玩家出牌的响应
+	void onResponsePlayCards(Player* player, const Cards& playCards);
+	
+	//接收来自按钮组的用户出牌信号的槽函数
+	void onUserPlayCards();
+
+	//接收来自按钮组的用户过牌信号的槽函数
+	void onUserPassCards();
+
+	////////////////////////////////////////////////////////////////////
+	////////////游戏窗口响应游戏变换的函数，在主文件GamePanel.cpp中////////
+	///////////////////////////////////////////////////////////////////
+
+
+
+
+
+	////////////////////////////////////////////////////////////////////
+	////////////游戏初始化相关函数，在分文件GamePanelInit.cpp中///////////
+	///////////////////////////////////////////////////////////////////
+	//游戏控制类初始化，实例化游戏控制类对象，并初始化玩家，并且将三个玩家对象保存到类中
+		//这个函数初始化了GameControl类成员变量m_gameControl，并且初始化了玩家对象，并且将三个玩家对象保存到m_playerList中
+	void initGameControl();
 
 	//初始化卡牌相关内容，包括切割卡牌图片，将卡牌与卡牌窗口绑定
 		//这个函数将资源文件中的总卡牌图片个个分割出来，并且逐个调用cropCardImages函数将卡牌与卡牌窗口绑定
@@ -90,6 +129,28 @@ private:
 		// 卡牌窗口包括基础牌窗口m_baseCardPanel，移动到玩家手中的牌窗口m_moveCardPanel，地主三张底牌窗口m_lordCardPanelList
 	void initCardsScene();
 
+	//初始化用户出牌的倒计时窗口，并且将Ticking类的信号和槽函数绑定
+		//如果用户是优先出牌，则不启动倒计时，否则启动倒计时
+		//启动计时在玩家状态切换函数playerStateProcess中开启，但是关闭计时会在两个用户响应牌操作的函数onUserPlayCards和onUserPassCards中关闭
+	void initUserTicking();
+	
+	////////////////////////////////////////////////////////////////////
+	////////////游戏初始化相关函数，在分文件GamePanelInit.cpp中///////////
+	///////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+	////////////////////////////////////////////////////////////////////
+	////////////游戏状态机，在分文件GamePanelProcess.cpp中///////////////
+	///////////////////////////////////////////////////////////////////
 	//游戏状态对窗口的控制函数
 		//类似游戏引擎的状态机，这个函数接收参数state并且保存到成员变量m_currentGameState中，然后根据不同的游戏状态调用不同的处理函数，是游戏状态主控函数
 		//内部调用了发牌的子函数dealCardsProcess
@@ -99,51 +160,48 @@ private:
 		//这个函数应该发生在点击开始按钮之后，完成了重置卡牌窗口，重置了玩家上下文环境，隐藏按钮组窗口，启动发牌动画定时器，定时器槽函数是onDealCardTimerTimeout
 	void dealCardsProcess();
 
-	//定时器计时的槽函数，发牌动画在这里处理
-		//这个函数是发牌的过程和动画的实现函数，分为两个部分，第一部分是实现发牌动画的渲染，通过cardMoveStep函数实现发牌动画
-		//第二部分是当动画到达当前玩家手中，应该在牌堆中取出一张牌，存入当前玩家手牌，并且通过disposHandCards更新当前玩家手牌显示，然后切换玩家。
-		//当发完所有牌之后，停止定时器，切换游戏状态到叫地主状态
-	void onDealCardTimerTimeout();
-
-	//移动扑克牌的函数，实现发牌动画
-	void cardMoveStep(Player* curPlayer);
-	
-	//更新玩家手牌，里面调用更新玩家手牌窗口位置的函数
-		//这个函数实现了为发来的牌窗口CardPanel对象设置对应所有者，并且调用updateHandCardsPanel函数更新玩家手牌窗口显示
-	void disposHandCards(Player* player,const Cards& hcards);
-
-	//更新玩家手牌窗口位置的通用函数，一更新就是整个窗口
-	void updateHandCardsPanel(Player* player);
-
-	//中间牌堆移动到地主牌的动画槽函数
-	void onBaseToLordTimeout();
-	
-	//从中间牌堆到地主牌框的动画实现函数
-	void lordCardMoveStep();
-
 	//状态转换抢地主的处理函数
 	void callLordProcess();
-
-	//处理玩家状态转换的函数
-	void playerStateProcess(Player* player, GameControl::PlayerState playerState);
-
-	//接收来自GameControl的叫地主/抢地主信号的槽函数
-	void onPlayerGrabLordBet(Player* player, int bet, bool first);
-
-	//显示叫分/炸弹/飞机等动画的集成函数
-	void showAnimation(WindowAnimation type,int bet=0);
-
-	//接收来自GameControl的玩家出牌信号的槽函数，是界面对玩家出牌的响应
-	void onResponsePlayCards(Player* player, const Cards& playCards);
 
 	//游戏进入打牌状态的处理函数
 	void playCardsProcess();
 
-	//playCardsProcess的子函数，完成地主牌向地主玩家手牌移动的动画
-	void onLordCardsToLordTimeout();
+	//处理玩家状态转换的函数
+	void playerStateProcess(Player* player, GameControl::PlayerState playerState);
+	////////////////////////////////////////////////////////////////////
+	////////////游戏状态机，在分文件GamePanelProcess.cpp中///////////////
+	///////////////////////////////////////////////////////////////////
 
-	//playCardsProcess的子函数的子函数，实现把玩家头像显示出来的功能
+
+
+
+
+
+	////////////////////////////////////////////////////////////////////
+	////////////游戏动画与特性，在分文件GamePanelAnim.cpp中//////////////
+	///////////////////////////////////////////////////////////////////
+	//使用qt动画框架实现发牌动画
+	void startDealCardAnimation();
+
+	//使用qt动画框架实现地主牌移动并行动画
+	void startBaseToLordAnimation();
+
+	//使用qt动画框架实现成为地主后，地主牌移动到地主玩家手中动画
+	void startLordToHandAnimation();
+
+	//playCardsProcess的子函数startLordToHandAnimation的子函数，实现把玩家头像显示出来的功能
 	void showPlayerRoleImage();
+
+	//显示叫分/炸弹/飞机等动画的集成函数
+	void showAnimation(WindowAnimation type, int bet = 0);
+
+	//游戏结束后显示结算面板，在playerStateProcess中被调用，同时做了动画
+	void showEndingPanel();
+	////////////////////////////////////////////////////////////////////
+	////////////游戏动画与特性，在分文件GamePanelAnim.cpp中//////////////
+	///////////////////////////////////////////////////////////////////
+
+
 
 
 
@@ -170,22 +228,26 @@ private:
 	CardPanel* m_baseCardPanel;
 	//移动到玩家手中的牌窗口
 	CardPanel* m_moveCardPanel;
-	//地主三张底牌窗口
+	//地主三张底牌窗口，这三个窗口是和 地主牌移动窗口，和地主玩家的地主牌 窗口各不同
 	QVector<CardPanel*> m_lordCardPanelList;
 	//记录当前游戏状态
 	GameControl::GameState m_currentGameState;
-	//发牌过程中的定时器
-	QTimer* m_dealCardTimer;
-	//用于记录发牌的步长
-	int m_cardMovePos;
-	//地主牌移动定时器
-	QTimer* m_lordCardMoveTimer;
-	//辅助地主牌移动的索引
-	int m_lordCardMoveIndex;
-	// 三张同时飞行所用的临时移动牌面（背面图）
+	// 三张同时飞行所用的临时移动牌面（背面图），在地主抢完后，改为正面图
 	QVector<CardPanel*> m_lordMovingPanels;
 	//游戏特效/动画类
 	Animation* m_animation;
+	//当前被选中的牌窗口
+	CardPanel* m_curSelCard;
+	//当前被选中的牌集合
+	QSet<CardPanel*> m_selectedCardSet;
+	//判断拖选功能是否激活，主要用于分别点选和拖选
+	bool m_dragActive;
+	//反向记录拖选的这张卡牌的选中情况，用于拖选功能
+	bool m_dragTargetSelected;
+	//游戏的结束面板
+	EndingPanel* m_endingPanel;
+	//用户出牌的倒计时窗口
+	Ticking* m_userTicking;
 };
 
 
